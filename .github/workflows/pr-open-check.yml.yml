@@ -1,0 +1,80 @@
+name: 👁 PR Open Check
+
+on:
+  pull_request_target:
+    types: [opened, edited, reopened, synchronize]
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    permissions:
+      pull-requests: write
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check PR title and changelog
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { owner, repo } = context.repo;
+            const prNumber = context.issue.number;
+            const pr = context.payload.pull_request;
+            const title = pr.title;
+            const body = pr.body || '';
+
+            // Valid PR type prefixes with emojis
+            const validTypes = [
+              '✨ feat',
+              '🐛 fix',
+              '📝 docs',
+              '💄 style',
+              '♻️ refactor',
+              '⚡️ perf',
+              '✅ test',
+              '👷 build',
+              '🤖 ci',
+              '🐳 chore',
+              '🔙 revert',
+              '📚 types'
+            ];
+
+            const errors = [];
+
+            // Check PR title
+            const titleValid = validTypes.some(type => title.startsWith(type));
+            if (!titleValid) {
+              errors.push('❌ PR title must start with one of the following:');
+            }
+
+            // Check changelog (English and Chinese)
+            const hasEnglishChangelog = /\|\s*🇺🇸\s*English\s*\|[^|]+[^\s|][^|]*\|/.test(body) ||
+                                       /🇺🇸\s*English\s*\|[^|]*[^\s|][^|]*/.test(body);
+            const hasChineseChangelog = /\|\s*🇨🇳\s*Chinese\s*\|[^|]+[^\s|][^|]*\|/.test(body) ||
+                                       /🇨🇳\s*Chinese\s*\|[^|]*[^\s|][^|]*/.test(body);
+
+            if (!hasEnglishChangelog || !hasChineseChangelog) {
+              errors.push('❌ Please fill in the English / Chinese changelog in "🇺🇸 English" / "🇨🇳 Chinese" field');
+            }
+
+            // If there are errors, comment on the PR (only on first check)
+            if (errors.length > 0) {
+              const eventAction = context.payload.action;
+              // Only comment on 'opened' action to avoid duplicate comments
+              if (eventAction === 'opened') {
+                const typeTable = '| ✨ feat | 🐛 fix | 📝 docs |\n| --- | --- | --- |\n| 💄 style | ♻️ refactor | ⚡️ perf |\n| ✅ test | 👷 build | 🤖 ci |\n| 🐳 chore | 🔙 revert | 📚 types |';
+
+                const errorMessages = errors.map(e => e.replace(/❌\s*/, '')).join('\n');
+
+                const comment = `## ⚠️ PR Check Failed\n\n${errorMessages}\n\n${typeTable}`;
+
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number: prNumber,
+                  body: comment
+                });
+              }
+
+              core.setFailed('PR validation failed. Please check the comments above.');
+            }
